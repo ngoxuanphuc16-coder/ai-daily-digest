@@ -1,0 +1,77 @@
+name: Daily AI Digest
+
+on:
+  schedule:
+    # 00:00 UTC == 07:00 ICT (UTC+7). GitHub's scheduler is best-effort and can
+    # lag by several minutes during peak load — that is expected, not a bug.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview only — do not send the email"
+        type: boolean
+        default: false
+      no_llm:
+        description: "Skip Gemini and use the extractive fallback"
+        type: boolean
+        default: false
+      hours:
+        description: "Lookback window in hours"
+        type: string
+        default: "24"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Build and send digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+          SMTP_SERVER: ${{ vars.SMTP_SERVER || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || '465' }}
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          SENDER_NAME: ${{ vars.SENDER_NAME || 'AI Daily Digest' }}
+          LOOKBACK_HOURS: ${{ inputs.hours || '24' }}
+          MAX_ARTICLES: ${{ vars.MAX_ARTICLES || '25' }}
+          SUMMARY_WORKERS: ${{ vars.SUMMARY_WORKERS || '4' }}
+        run: |
+          python main.py \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ inputs.no_llm && '--no-llm' || '' }}
+
+      - name: Upload rendered digest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-html
+          path: output/*.html
+          retention-days: 14
+          if-no-files-found: ignore

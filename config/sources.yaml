@@ -1,0 +1,123 @@
+# AI Daily Digest — source configuration
+#
+# `defaults` applies to every source unless the source overrides it.
+# Each source uses `type: rss` (preferred) or `type: html` (BeautifulSoup
+# scraper, best-effort — publishers change markup often).
+#
+# An RSS source may declare an optional `fallback:` block that is tried only
+# when the feed errors out or returns zero entries.
+
+defaults:
+  # Only articles published within this window are collected.
+  lookback_hours: 24
+  # Hard cap per publisher, applied after sorting newest-first.
+  max_articles_per_source: 8
+  request_timeout: 20
+  user_agent: "ai-daily-digest/1.0 (+https://github.com/topics/ai-newsletter)"
+
+sources:
+  - id: openai
+    name: OpenAI
+    category: Frontier Labs
+    type: rss
+    url: https://openai.com/news/rss.xml
+    homepage: https://openai.com/news/
+    enabled: true
+
+  # Anthropic publishes no RSS feed (every /rss.xml, /rss, /feed.xml variant
+  # returns 404 as of 2026-07-29), so this is a scrape of the news index.
+  # The cards are server-rendered and carry a date, but only to day precision —
+  # a post from yesterday afternoon can fall outside a 24h window. Use
+  # `--hours 48` if you would rather over-collect than miss one.
+  - id: anthropic
+    name: Anthropic
+    category: Frontier Labs
+    type: html
+    url: https://www.anthropic.com/news
+    homepage: https://www.anthropic.com/news
+    enabled: true
+    item_selector: "a[href^='/news/']"
+    # The featured grid uses headings; the list below it uses a title <span>.
+    # Without the span rule those cards fall back to raw anchor text, which
+    # swallows the date and category into the headline.
+    title_selector: "h2, h3, h4, span[class*='title']"
+    summary_selector: "p"
+    date_selector: "time"
+    fallback:
+      type: html
+      url: https://www.anthropic.com/engineering
+      item_selector: "article"
+      title_selector: "h2, h3, h4"
+      link_selector: "a"
+      summary_selector: "p"
+      date_selector: "time"
+
+  - id: deepmind
+    name: Google DeepMind
+    category: Frontier Labs
+    type: rss
+    url: https://deepmind.google/blog/rss.xml
+    homepage: https://deepmind.google/discover/blog/
+    enabled: true
+
+  # ai.meta.com/blog has no feed (404 on every variant) and its cards carry no
+  # publication date — scraping them would re-surface old posts every single
+  # day. Meta's engineering blog is a real dated feed covering the same AI/ML
+  # work, so the digest uses that instead. Meta posts in bursts, so expect
+  # quiet days rather than daily items.
+  - id: meta-ai
+    name: Meta AI & Engineering
+    category: Frontier Labs
+    type: rss
+    url: https://engineering.fb.com/feed/
+    homepage: https://ai.meta.com/blog/
+    enabled: true
+    fallback:
+      type: rss
+      url: https://engineering.fb.com/category/ml-applications/feed/
+
+  - id: huggingface
+    name: Hugging Face
+    category: Open Source & Community
+    type: rss
+    url: https://huggingface.co/blog/feed.xml
+    homepage: https://huggingface.co/blog
+    enabled: true
+
+  # blogs.microsoft.com/ai/feed/ now returns 410 Gone; the AI topic feed on
+  # news.microsoft.com is the live replacement.
+  - id: microsoft-ai
+    name: Microsoft AI
+    category: Industry & Platforms
+    type: rss
+    url: https://news.microsoft.com/source/topics/ai/feed/
+    homepage: https://news.microsoft.com/source/topics/ai/
+    enabled: true
+    fallback:
+      type: rss
+      url: https://blogs.microsoft.com/feed/
+
+  - id: mit-tech-review
+    name: MIT Technology Review — AI
+    category: Media & Analysis
+    type: rss
+    url: https://www.technologyreview.com/topic/artificial-intelligence/feed/
+    homepage: https://www.technologyreview.com/topic/artificial-intelligence/
+    enabled: true
+    fallback:
+      type: html
+      url: https://www.technologyreview.com/topic/artificial-intelligence/
+      item_selector: "div[class*='contentItem']"
+      title_selector: "h3, h2"
+      link_selector: "a"
+      summary_selector: "div[class*='excerpt'], p"
+
+  - id: arxiv-cs-ai
+    name: arXiv cs.AI
+    category: Research
+    type: rss
+    url: http://export.arxiv.org/rss/cs.AI
+    homepage: https://arxiv.org/list/cs.AI/recent
+    enabled: true
+    # arXiv publishes a large daily batch; keep it from flooding the digest.
+    max_articles_per_source: 5

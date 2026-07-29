@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="vi" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>AI Daily Digest — {{ digest.date_label }}</title>
+  <style>
+    /* Email clients strip most of this; every critical style is also inlined. */
+    :root { color-scheme: light dark; supported-color-schemes: light dark; }
+
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+    a { text-decoration: none; }
+
+    .wrap      { background-color: #f4f5f7; }
+    .card      { background-color: #ffffff; border: 1px solid #e4e7ec; }
+    .headline  { color: #14161a; }
+    .body-text { color: #3b424e; }
+    .muted     { color: #5b6472; }
+    .accent    { color: #4f46e5; }
+    .rule      { border-top: 1px solid #e4e7ec; }
+    .pill      { background-color: #eef0ff; color: #4338ca; }
+    .badge     { background-color: #4f46e5; color: #ffffff; }
+    .chip      { background-color: #f1f3f6; color: #5b6472; }
+    .hero      { background-color: #101322; }
+
+    @media (prefers-color-scheme: dark) {
+      .wrap      { background-color: #0d1117 !important; }
+      .card      { background-color: #161b22 !important; border-color: #262c36 !important; }
+      .headline  { color: #e6edf3 !important; }
+      .body-text { color: #c3ccd7 !important; }
+      .muted     { color: #8b949e !important; }
+      .accent    { color: #a5b4fc !important; }
+      .rule      { border-top-color: #262c36 !important; }
+      .pill      { background-color: #1e2340 !important; color: #a5b4fc !important; }
+      .badge     { background-color: #6366f1 !important; color: #ffffff !important; }
+      .chip      { background-color: #1c222b !important; color: #8b949e !important; }
+      .hero      { background-color: #0b0e17 !important; }
+    }
+
+    @media only screen and (max-width: 620px) {
+      .container { width: 100% !important; }
+      .pad-x     { padding-left: 18px !important; padding-right: 18px !important; }
+      .stack     { display: block !important; width: 100% !important; }
+      .h1        { font-size: 24px !important; line-height: 30px !important; }
+      .title     { font-size: 17px !important; line-height: 24px !important; }
+    }
+  </style>
+</head>
+
+<body class="wrap" style="margin:0; padding:0; width:100%; background-color:#f4f5f7;">
+
+  <!-- Preheader: shown in the inbox preview, hidden in the body. -->
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
+    {% if digest.is_empty %}
+      Không có tin AI mới trong 24 giờ qua.
+    {% else %}
+      {{ digest.stats.total }} tin AI đáng chú ý hôm nay{% if digest.must_reads %} · {{ digest.must_reads[0].article.title }}{% endif %}
+    {% endif %}
+    &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="wrap" style="background-color:#f4f5f7;">
+    <tr>
+      <td align="center" style="padding:24px 12px 40px 12px;">
+
+        <table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" border="0" style="width:640px; max-width:640px;">
+
+          <!-- ============================= HERO ============================ -->
+          <tr>
+            <td class="hero pad-x" style="background-color:#101322; border-radius:16px; padding:32px 32px 28px 32px;">
+              <p style="margin:0 0 10px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; letter-spacing:1.6px; text-transform:uppercase; color:#8b93ff;">
+                Bản tin AI hằng ngày
+              </p>
+              <h1 class="h1" style="margin:0 0 12px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:28px; line-height:34px; font-weight:700; color:#ffffff;">
+                AI Daily Digest
+              </h1>
+              <p style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:15px; line-height:22px; color:#c7cbe8;">
+                {{ digest.date_label }}
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;">
+                <tr>
+                  <td style="padding-right:10px;">
+                    <span style="display:inline-block; padding:6px 12px; border-radius:999px; background-color:#1c2140; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; color:#a5b4fc;">
+                      {{ digest.stats.total }} bài viết
+                    </span>
+                  </td>
+                  <td style="padding-right:10px;">
+                    <span style="display:inline-block; padding:6px 12px; border-radius:999px; background-color:#1c2140; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; color:#a5b4fc;">
+                      {{ digest.stats.sources_ok }}/{{ digest.stats.sources_total }} nguồn
+                    </span>
+                  </td>
+                  <td>
+                    <span style="display:inline-block; padding:6px 12px; border-radius:999px; background-color:#1c2140; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; color:#a5b4fc;">
+                      {% if digest.llm_enabled %}{{ digest.model or 'Gemini' }}{% else %}Tóm tắt trích xuất{% endif %}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          {% if digest.is_empty %}
+          <!-- ============================ EMPTY =========================== -->
+          <tr>
+            <td style="padding:24px 0 0 0;">
+              <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border:1px solid #e4e7ec; border-radius:14px;">
+                <tr>
+                  <td class="pad-x" style="padding:36px 32px; text-align:center;">
+                    <p class="headline" style="margin:0 0 8px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:18px; line-height:26px; font-weight:600; color:#14161a;">
+                      Hôm nay không có tin mới
+                    </p>
+                    <p class="muted" style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:22px; color:#5b6472;">
+                      Không nguồn nào đăng bài trong 24 giờ qua. Bản tin sẽ trở lại vào 7:00 sáng mai.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% else %}
+
+          <!-- ========================== MUST READ ========================= -->
+          {% if digest.must_reads %}
+          <tr>
+            <td style="padding:32px 4px 14px 4px;">
+              <h2 class="headline" style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:18px; letter-spacing:1.4px; text-transform:uppercase; font-weight:700; color:#14161a;">
+                ⭐ Top {{ digest.must_reads|length }} must-read
+              </h2>
+            </td>
+          </tr>
+
+          {% for item in digest.must_reads %}
+          <tr>
+            <td style="padding:0 0 12px 0;">
+              <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border:1px solid #e4e7ec; border-radius:14px;">
+                <tr>
+                  <td class="pad-x" style="padding:22px 24px;">
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td width="34" valign="top" style="width:34px; padding-right:12px;">
+                          <span class="badge" style="display:inline-block; width:26px; height:26px; border-radius:8px; background-color:#4f46e5; color:#ffffff; text-align:center; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:26px; font-weight:700;">
+                            {{ loop.index }}
+                          </span>
+                        </td>
+                        <td valign="top">
+                          <p class="muted" style="margin:0 0 6px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; color:#5b6472;">
+                            {{ item.article.source_name }} · {{ item.article.published_label }}
+                            <span class="accent" style="color:#4f46e5;">&nbsp;{{ item.summary.stars }}</span>
+                          </p>
+                          <a href="{{ item.article.url }}" class="headline title" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:19px; line-height:26px; font-weight:700; color:#14161a; text-decoration:none;">
+                            {{ item.article.title }}
+                          </a>
+                          {# Sources without an excerpt fall back to the title; don't print it twice. #}
+                          {% if item.summary.tldr and item.summary.tldr != item.article.title %}
+                          <p class="body-text" style="margin:10px 0 0 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:15px; line-height:23px; color:#3b424e;">
+                            {{ item.summary.tldr }}
+                          </p>
+                          {% endif %}
+
+                          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">
+                            {% for takeaway in item.summary.key_takeaways %}
+                            <tr>
+                              <td width="14" valign="top" style="width:14px; padding:0 0 6px 0;">
+                                <span class="accent" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:22px; color:#4f46e5;">•</span>
+                              </td>
+                              <td valign="top" style="padding:0 0 6px 0;">
+                                <span class="body-text" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:22px; color:#3b424e;">{{ takeaway }}</span>
+                              </td>
+                            </tr>
+                            {% endfor %}
+                          </table>
+
+                          <p style="margin:12px 0 0 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:20px;">
+                            {% for tag in item.summary.tags %}
+                            <span class="pill" style="display:inline-block; margin:0 4px 4px 0; padding:3px 9px; border-radius:999px; background-color:#eef0ff; color:#4338ca; font-size:11px; line-height:16px;">{{ tag }}</span>
+                            {% endfor %}
+                          </p>
+
+                          <p style="margin:10px 0 0 0;">
+                            <a href="{{ item.article.url }}" class="accent" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:20px; font-weight:600; color:#4f46e5; text-decoration:none;">
+                              Đọc bài gốc →
+                            </a>
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% endfor %}
+          {% endif %}
+
+          <!-- ========================== BY SOURCE ========================= -->
+          {% for group in digest.groups %}
+          <tr>
+            <td style="padding:26px 4px 12px 4px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td>
+                    <h2 class="headline" style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:16px; line-height:22px; font-weight:700; color:#14161a;">
+                      {{ group.source_name }}
+                    </h2>
+                  </td>
+                  <td align="right">
+                    <span class="chip" style="display:inline-block; padding:4px 10px; border-radius:999px; background-color:#f1f3f6; color:#5b6472; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:11px; line-height:16px;">
+                      {{ group.category }} · {{ group.items|length }}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          {% for item in group.items %}
+          <tr>
+            <td style="padding:0 0 10px 0;">
+              <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff; border:1px solid #e4e7ec; border-radius:12px;">
+                <tr>
+                  <td class="pad-x" style="padding:18px 22px;">
+                    <p class="muted" style="margin:0 0 6px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:16px; color:#5b6472;">
+                      {{ item.article.published_label }}
+                      <span class="accent" style="color:#4f46e5;">&nbsp;{{ item.summary.stars }}</span>
+                      {% if item.summary.fallback %}
+                      <span class="chip" style="display:inline-block; margin-left:6px; padding:2px 7px; border-radius:6px; background-color:#f1f3f6; color:#5b6472; font-size:10px; line-height:14px;">trích xuất</span>
+                      {% endif %}
+                    </p>
+
+                    <a href="{{ item.article.url }}" class="headline title" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:16px; line-height:23px; font-weight:600; color:#14161a; text-decoration:none;">
+                      {{ item.article.title }}
+                    </a>
+
+                    {% if item.summary.tldr and item.summary.tldr != item.article.title %}
+                    <p class="body-text" style="margin:8px 0 0 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:22px; color:#3b424e;">
+                      {{ item.summary.tldr }}
+                    </p>
+                    {% endif %}
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;">
+                      {% for takeaway in item.summary.key_takeaways %}
+                      <tr>
+                        <td width="14" valign="top" style="width:14px; padding:0 0 5px 0;">
+                          <span class="muted" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#5b6472;">•</span>
+                        </td>
+                        <td valign="top" style="padding:0 0 5px 0;">
+                          <span class="body-text" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:21px; color:#3b424e;">{{ takeaway }}</span>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </table>
+
+                    <p style="margin:10px 0 0 0; font-size:12px; line-height:20px;">
+                      {% for tag in item.summary.tags %}
+                      <span class="pill" style="display:inline-block; margin:0 4px 4px 0; padding:3px 9px; border-radius:999px; background-color:#eef0ff; color:#4338ca; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:11px; line-height:16px;">{{ tag }}</span>
+                      {% endfor %}
+                      <a href="{{ item.article.url }}" class="accent" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:20px; font-weight:600; color:#4f46e5; text-decoration:none;">&nbsp;Đọc bài gốc →</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          {% endfor %}
+          {% endfor %}
+          {% endif %}
+
+          <!-- ============================ FOOTER ========================== -->
+          <tr>
+            <td class="pad-x" style="padding:26px 12px 0 12px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td class="rule" style="border-top:1px solid #e4e7ec; padding-top:18px;">
+
+                    {% if digest.failed_sources %}
+                    <p class="muted" style="margin:0 0 8px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:19px; color:#5b6472;">
+                      ⚠️ Không lấy được dữ liệu từ:
+                      {% for result in digest.failed_sources %}{{ result.source_name }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    </p>
+                    {% endif %}
+
+                    {% if digest.stats.fallback_summaries %}
+                    <p class="muted" style="margin:0 0 8px 0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:19px; color:#5b6472;">
+                      ℹ️ {{ digest.stats.fallback_summaries }}/{{ digest.stats.total }} bài dùng tóm tắt trích xuất (Gemini không khả dụng hoặc bị giới hạn).
+                    </p>
+                    {% endif %}
+
+                    <p class="muted" style="margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:19px; color:#5b6472;">
+                      Tạo tự động lúc {{ digest.generated_label }} bởi
+                      <strong>AI Daily Digest</strong>.
+                      Tóm tắt do AI sinh ra — hãy đọc bài gốc trước khi ra quyết định.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
