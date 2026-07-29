@@ -13,6 +13,7 @@ import logging
 import re
 import threading
 import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
@@ -21,6 +22,11 @@ from .fetcher import Article
 
 LOGGER = logging.getLogger(__name__)
 
+# Thinking models return a `thought_signature` part alongside the text, and the
+# SDK warns that `.text` skips it. The JSON is what we want, so this would just
+# be one warning per article in the job log.
+warnings.filterwarnings("ignore", message=".*non-text parts in the response.*")
+
 MAX_SCORE = 5
 MIN_SCORE = 1
 TAKEAWAY_COUNT = 3
@@ -28,6 +34,13 @@ MAX_TAGS = 4
 
 #: Consecutive hard failures before we stop calling the API for this run.
 CIRCUIT_BREAKER_THRESHOLD = 3
+
+#: Gemini's free tier allows 5 generate_content requests per minute per model.
+#: Paid tiers are far higher — raise GEMINI_RPM if you have quota.
+DEFAULT_REQUESTS_PER_MINUTE = 5
+
+#: Never sleep longer than this on a single retry, whatever the server asks.
+MAX_RETRY_SLEEP = 90.0
 
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
@@ -104,6 +117,30 @@ _HIGH_SIGNALS = (
 
 class SummarizerUnavailable(RuntimeError):
     """Raised when the Gemini client cannot be constructed at all."""
+
+
+class ResponseParseError(ValueError):
+    """Malformed or truncated model output — always worth another sample."""
+
+
+def _thinking_config(types_module: Any, model: str) -> Any:
+    """Disable internal thinking on the one family that accepts the knob.
+
+    gemini-2.5 spends `max_output_tokens` on reasoning before emitting a
+    single character, which truncates the JSON mid-string — Vietnamese costs
+    noticeably more tokens than English, so the budget runs out fast. This is
+    fixed-schema extraction, so the reasoning buys nothing.
+
+    Gemini 3.x rejects `thinking_budget` outright (400 INVALID_ARGUMENT) and
+    the SDK has no `thinking_level` yet, so those models are left alone and
+    given a larger output budget instead.
+    """
+    if not re.search(r"gemini-2\.5", model):
+        return None
+    try:
+        return types_module.ThinkingConfig(thinking_budget=0)
+    except (AttributeError, TypeError):  # older SDK, or model without support
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -290,25 +327,77 @@ def _is_retryable(error: BaseException) -> bool:
     return any(marker in message for marker in _RETRYABLE_MARKERS)
 
 
+def _retry_after(error: BaseException) -> Optional[float]:
+    """Seconds the API asked us to wait, if it said so.
+
+    A 429 carries `retryDelay: '57s'`. Guessing with exponential backoff when
+    the server already told us the answer just burns the remaining attempts.
+    """
+    text = str(error)
+    for pattern in (
+        r"retryDelay['\"]?\s*[:=]\s*['\"]?(\d+(?:\.\d+)?)s",
+        r"retry in (\d+(?:\.\d+)?)s",
+    ):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            try:
+                return min(float(match.group(1)) + 1.0, MAX_RETRY_SLEEP)
+            except ValueError:
+                continue
+    return None
+
+
+class _RateLimiter:
+    """Spaces calls evenly so a burst never trips the per-minute quota.
+
+    A plain token bucket would let all workers fire at once and immediately
+    exhaust a 5/minute allowance, so slots are handed out at fixed intervals.
+    """
+
+    def __init__(self, per_minute: int) -> None:
+        self.per_minute = max(1, per_minute)
+        self._interval = 60.0 / self.per_minute
+        self._lock = threading.Lock()
+        self._next_slot = 0.0
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            if self._next_slot <= now:
+                self._next_slot = now + self._interval
+                return
+            wait = self._next_slot - now
+            self._next_slot += self._interval
+        LOGGER.debug("Rate limiter holding for %.1fs", wait)
+        time.sleep(wait)
+
+
 def _parse_payload(text: str, article: Article, model: str) -> Summary:
     raw = (text or "").strip()
     if not raw:
-        raise ValueError("empty response from model")
+        raise ResponseParseError("empty response from model")
 
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
         match = _JSON_OBJECT.search(raw)
         if not match:
-            raise ValueError("response was not JSON: {}".format(raw[:160]))
-        payload = json.loads(match.group(0))
+            raise ResponseParseError(
+                "response was not valid JSON (likely truncated): {}".format(raw[:160])
+            )
+        try:
+            payload = json.loads(match.group(0))
+        except json.JSONDecodeError as exc:
+            raise ResponseParseError("could not repair JSON: {}".format(exc)) from exc
 
     if not isinstance(payload, dict):
-        raise ValueError("expected a JSON object, got {}".format(type(payload).__name__))
+        raise ResponseParseError(
+            "expected a JSON object, got {}".format(type(payload).__name__)
+        )
 
     tldr = str(payload.get("tldr") or "").strip()
     if not tldr:
-        raise ValueError("response is missing `tldr`")
+        raise ResponseParseError("response is missing `tldr`")
 
     filler = "Xem chi tiết trong bài gốc trên {}.".format(article.source_name)
     return Summary(
@@ -332,11 +421,13 @@ class GeminiSummarizer:
         model: str = "gemini-2.5-flash",
         max_retries: int = 3,
         retry_base_delay: float = 2.0,
+        requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE,
     ) -> None:
         self.api_key = api_key or ""
         self.model = model
         self.max_retries = max(1, max_retries)
         self.retry_base_delay = retry_base_delay
+        self._limiter = _RateLimiter(requests_per_minute)
 
         self._client: Any = None
         self._types: Any = None
@@ -407,17 +498,25 @@ class GeminiSummarizer:
             LOGGER.warning("Gemini unavailable: %s", exc)
             return heuristic_summary(article, "Gemini không khả dụng: {}".format(exc))
 
-        config = self._types.GenerateContentConfig(
-            system_instruction=SYSTEM_INSTRUCTION,
-            response_mime_type="application/json",
-            response_schema=RESPONSE_SCHEMA,
-            temperature=0.3,
-            max_output_tokens=1024,
-        )
+        config_kwargs: Dict[str, Any] = {
+            "system_instruction": SYSTEM_INSTRUCTION,
+            "response_mime_type": "application/json",
+            "response_schema": RESPONSE_SCHEMA,
+            "temperature": 0.3,
+            # Generous, because on models whose thinking cannot be disabled
+            # this budget is shared with the reasoning tokens. Billing is on
+            # tokens actually produced, so a high ceiling costs nothing.
+            "max_output_tokens": 4096,
+        }
+        thinking = _thinking_config(self._types, self.model)
+        if thinking is not None:
+            config_kwargs["thinking_config"] = thinking
+        config = self._types.GenerateContentConfig(**config_kwargs)
 
         last_error: Optional[BaseException] = None
         for attempt in range(1, self.max_retries + 1):
             try:
+                self._limiter.acquire()
                 response = client.models.generate_content(
                     model=self.model,
                     contents=_build_prompt(article),
@@ -428,17 +527,23 @@ class GeminiSummarizer:
                 return summary
             except Exception as exc:  # noqa: BLE001 - all failures degrade the same way
                 last_error = exc
-                retryable = _is_retryable(exc)
+                # A malformed sample is transient: resampling usually fixes it.
+                retryable = isinstance(exc, ResponseParseError) or _is_retryable(exc)
                 LOGGER.warning(
                     "Gemini attempt %d/%d failed for %r: %s",
                     attempt,
                     self.max_retries,
                     article.title[:60],
-                    exc,
+                    str(exc)[:200],
                 )
                 if not retryable or attempt == self.max_retries:
                     break
-                time.sleep(self.retry_base_delay * (2 ** (attempt - 1)))
+                # Prefer the server's own retryDelay over a blind guess.
+                delay = _retry_after(exc)
+                if delay is None:
+                    delay = self.retry_base_delay * (2 ** (attempt - 1))
+                LOGGER.info("Retrying in %.0fs", delay)
+                time.sleep(delay)
 
         reason = "{}".format(last_error)[:160]
         self._trip_breaker(reason)
@@ -455,6 +560,7 @@ def summarize_articles(
     use_llm: bool = True,
     workers: int = 4,
     max_retries: int = 3,
+    requests_per_minute: int = DEFAULT_REQUESTS_PER_MINUTE,
 ) -> List[SummarizedArticle]:
     """Summarize every article, preserving input order.
 
@@ -474,11 +580,22 @@ def summarize_articles(
             LOGGER.warning("GEMINI_API_KEY is not set; using the extractive fallback")
         return [SummarizedArticle(a, heuristic_summary(a, note)) for a in articles]
 
-    summarizer = GeminiSummarizer(api_key=api_key, model=model, max_retries=max_retries)
+    summarizer = GeminiSummarizer(
+        api_key=api_key,
+        model=model,
+        max_retries=max_retries,
+        requests_per_minute=requests_per_minute,
+    )
     worker_count = max(1, min(workers, len(articles)))
 
+    estimate = len(articles) * 60.0 / max(1, requests_per_minute)
     LOGGER.info(
-        "Summarizing %d article(s) with %s (%d worker(s))", len(articles), model, worker_count
+        "Summarizing %d article(s) with %s (%d worker(s), %d req/min, ~%.0fs)",
+        len(articles),
+        model,
+        worker_count,
+        requests_per_minute,
+        estimate,
     )
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
         summaries = list(pool.map(summarizer.summarize, articles))

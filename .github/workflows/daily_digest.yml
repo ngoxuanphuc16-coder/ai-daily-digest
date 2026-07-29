@@ -60,8 +60,10 @@ jobs:
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
           SENDER_NAME: ${{ vars.SENDER_NAME || 'AI Daily Digest' }}
           LOOKBACK_HOURS: ${{ inputs.hours || '24' }}
-          MAX_ARTICLES: ${{ vars.MAX_ARTICLES || '25' }}
+          MAX_ARTICLES: ${{ vars.MAX_ARTICLES || '18' }}
           SUMMARY_WORKERS: ${{ vars.SUMMARY_WORKERS || '4' }}
+          # Gemini free tier = 5 requests/minute. Raise it if you have paid quota.
+          GEMINI_RPM: ${{ vars.GEMINI_RPM || '5' }}
         run: |
           python main.py \
             ${{ inputs.dry_run && '--dry-run' || '' }} \

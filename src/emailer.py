@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
+import socket
 import ssl
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -244,6 +246,50 @@ def render_text(digest: Digest) -> str:
 # --------------------------------------------------------------------------
 # delivery
 # --------------------------------------------------------------------------
+def ascii_local_hostname() -> str:
+    """An EHLO argument smtplib can actually put on the wire.
+
+    smtplib defaults to socket.getfqdn() and encodes the EHLO command as
+    ASCII. A machine name with diacritics — routine outside en-US locales —
+    therefore raises UnicodeEncodeError before the socket is even used.
+    """
+    try:
+        hostname = socket.getfqdn()
+    except OSError:
+        hostname = ""
+
+    if hostname:
+        try:
+            hostname.encode("ascii")
+            return hostname
+        except UnicodeEncodeError:
+            try:
+                return hostname.encode("idna").decode("ascii")
+            except (UnicodeError, ValueError):
+                pass
+
+    # RFC 5321 address literal — always a valid EHLO argument.
+    try:
+        return "[{}]".format(socket.gethostbyname(socket.gethostname()))
+    except (OSError, UnicodeError):
+        return "[127.0.0.1]"
+
+
+def _smtp_password(settings: Settings) -> str:
+    """Gmail shows App Passwords as 4 groups of 4 for readability only.
+
+    Pasting them with the spaces intact is the single most common setup
+    mistake, so strip them — but only for Google hosts and only when the
+    value matches that exact shape, since other providers may legitimately
+    allow spaces in a password.
+    """
+    password = settings.sender_password
+    if "gmail" in settings.smtp_server.lower() or "google" in settings.smtp_server.lower():
+        if re.fullmatch(r"[A-Za-z]{4}(?: [A-Za-z]{4}){3}", password or ""):
+            return password.replace(" ", "")
+    return password
+
+
 @contextmanager
 def _smtp_connection(settings: Settings) -> Iterator[smtplib.SMTP]:
     """Open an authenticated SMTP session.
@@ -252,16 +298,28 @@ def _smtp_connection(settings: Settings) -> Iterator[smtplib.SMTP]:
     submission with STARTTLS, which covers 587 and most custom relays.
     """
     context = ssl.create_default_context()
+    local_hostname = ascii_local_hostname()
     server: Optional[smtplib.SMTP] = None
     try:
         if settings.smtp_port == 465:
-            server = smtplib.SMTP_SSL(settings.smtp_server, settings.smtp_port, timeout=30, context=context)
+            server = smtplib.SMTP_SSL(
+                settings.smtp_server,
+                settings.smtp_port,
+                timeout=30,
+                context=context,
+                local_hostname=local_hostname,
+            )
         else:
-            server = smtplib.SMTP(settings.smtp_server, settings.smtp_port, timeout=30)
+            server = smtplib.SMTP(
+                settings.smtp_server,
+                settings.smtp_port,
+                timeout=30,
+                local_hostname=local_hostname,
+            )
             server.ehlo()
             server.starttls(context=context)
             server.ehlo()
-        server.login(settings.sender_email, settings.sender_password)
+        server.login(settings.sender_email, _smtp_password(settings))
         yield server
     except smtplib.SMTPAuthenticationError as exc:
         raise EmailError(

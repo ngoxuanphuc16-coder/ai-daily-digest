@@ -188,6 +188,7 @@ def run_pipeline(args: argparse.Namespace, settings: Settings) -> Digest:
         use_llm=use_llm,
         workers=settings.summary_workers,
         max_retries=settings.summary_max_retries,
+        requests_per_minute=settings.gemini_rpm,
     )
 
     model_label = settings.gemini_model if (use_llm and settings.has_gemini) else ""

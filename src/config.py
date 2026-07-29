@@ -100,9 +100,11 @@ class Settings:
     receiver_emails: List[str] = field(default_factory=list)
 
     lookback_hours: int = 24
-    max_articles: int = 25
+    max_articles: int = 18
     summary_workers: int = 4
     summary_max_retries: int = 3
+    #: Gemini free tier allows 5 generate_content calls per minute per model.
+    gemini_rpm: int = 5
     send_when_empty: bool = False
 
     sources_path: Path = DEFAULT_SOURCES_PATH
@@ -134,9 +136,10 @@ class Settings:
             sender_name=_env_str("SENDER_NAME", "AI Daily Digest"),
             receiver_emails=_env_email_list("RECEIVER_EMAIL"),
             lookback_hours=_env_int("LOOKBACK_HOURS", 24),
-            max_articles=_env_int("MAX_ARTICLES", 25),
+            max_articles=_env_int("MAX_ARTICLES", 18),
             summary_workers=_env_int("SUMMARY_WORKERS", 4),
             summary_max_retries=_env_int("SUMMARY_MAX_RETRIES", 3),
+            gemini_rpm=_env_int("GEMINI_RPM", 5),
             send_when_empty=_env_bool("SEND_WHEN_EMPTY", False),
         )
 

@@ -63,10 +63,42 @@ straight from the environment, which is how GitHub Actions supplies them.
 | `RECEIVER_EMAIL` | to send | — | Recipient(s), comma-separated |
 | `SENDER_NAME` | no | `AI Daily Digest` | From: display name |
 | `LOOKBACK_HOURS` | no | `24` | Collection window |
-| `MAX_ARTICLES` | no | `25` | Cap on articles sent to Gemini (cost control) |
+| `MAX_ARTICLES` | no | `18` | Cap on articles sent to Gemini (cost control) |
 | `SUMMARY_WORKERS` | no | `4` | Parallel Gemini calls — lower it if rate-limited |
 | `SUMMARY_MAX_RETRIES` | no | `3` | Attempts before falling back for that article |
+| `GEMINI_RPM` | no | `5` | Requests per minute — see below |
 | `SEND_WHEN_EMPTY` | no | `false` | Send even when nothing was found |
+
+### Free-tier quota — read this before tuning `MAX_ARTICLES`
+
+The binding constraint on a free Gemini key is the **daily** cap, not the
+per-minute one. Measured against a free-tier key on 2026-07-29:
+
+| Model | Per minute | **Per day** |
+|---|---|---|
+| `gemini-2.5-flash` | 5 | **20** |
+| `gemini-3.6-flash` | — | **20** |
+
+One article = one request. So a free key can summarize **at most 20 articles
+per day, across all runs combined** — and every `--dry-run` you fire while
+testing spends from the same allowance.
+
+That is why `MAX_ARTICLES` defaults to **18**, not 25: it leaves headroom so
+the scheduled 07:00 run always fits inside the daily budget. Articles beyond
+the cap are dropped before they ever reach Gemini; articles that hit a `429`
+anyway degrade to an extractive summary rather than vanishing.
+
+Practical consequences:
+
+- Test with `--no-llm` or `--limit 2`. A full `--dry-run` costs 18 of your 20.
+- Exceed the daily cap and the digest still arrives, just mostly extractive.
+- The quota resets on Google's schedule (midnight US Pacific), not at local
+  midnight — so a morning ICT run sits mid-cycle.
+- On a paid tier, raise `GEMINI_RPM` and `MAX_ARTICLES` together.
+
+Within a run, requests are spaced evenly to respect `GEMINI_RPM` rather than
+fired in a burst, and a `429` is retried using the server's own `retryDelay`
+instead of a guessed backoff.
 
 ### Gmail App Password
 
@@ -227,7 +259,8 @@ rest by publisher → `send_digest()` renders and sends `multipart/alternative`.
 | One feed 404s or times out | Logged, skipped, named in the email footer |
 | A scraper's markup changed | That source returns 0 articles; the rest still ship |
 | `GEMINI_API_KEY` missing | All summaries use the extractive fallback |
-| Gemini rate-limits (429) | Exponential backoff, then per-article fallback |
+| Gemini rate-limits (429) | Waits the server's own `retryDelay`, then per-article fallback |
+| Daily Gemini quota exhausted | Digest still sends; those articles get extractive summaries |
 | 3 consecutive Gemini failures | Circuit breaker skips the API for the rest of the run |
 | No articles found | Nothing is sent unless `SEND_WHEN_EMPTY=true` |
 | SMTP credentials wrong | Checked *before* any Gemini spend; exits `2` with a specific message |
