@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -135,6 +136,55 @@ def _default_output_path(generated_at: datetime) -> Path:
     return OUTPUT_DIR / "digest-{}.html".format(generated_at.astimezone(ICT).strftime("%Y-%m-%d"))
 
 
+def report_outcome(sent: bool, headline: str, digest: Optional[Digest] = None) -> None:
+    """State plainly whether an email went out, on stdout and in the job summary.
+
+    A green check with no email in the inbox is indistinguishable from a green
+    check with one, which makes "did it work?" unanswerable without reading
+    raw logs. GitHub renders $GITHUB_STEP_SUMMARY on the run page itself.
+    """
+    marker = "EMAIL SENT" if sent else "NO EMAIL SENT"
+    print("\n{}: {}".format(marker, headline))
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+
+    lines = [
+        "## {} {}".format("✅" if sent else "⚠️", marker),
+        "",
+        headline,
+        "",
+    ]
+    if digest is not None:
+        lines += [
+            "| | |",
+            "|---|---|",
+            "| Articles | {} |".format(digest.stats.get("total", 0)),
+            "| Sources OK | {}/{} |".format(
+                digest.stats.get("sources_ok", 0), digest.stats.get("sources_total", 0)
+            ),
+            "| Gemini summaries | {} |".format(digest.stats.get("llm_summaries", 0)),
+            "| Extractive fallbacks | {} |".format(digest.stats.get("fallback_summaries", 0)),
+            "",
+            "### Sources",
+            "",
+            "| Source | Status | Articles | Detail |",
+            "|---|---|---|---|",
+        ]
+        for result in digest.fetch_results:
+            lines.append(
+                "| {} | {} | {} | {} |".format(
+                    result.source_name, result.status, result.count, result.detail or ""
+                )
+            )
+    try:
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        LOGGER.warning("Could not write the job summary: %s", exc)
+
+
 def print_digest(digest: Digest) -> None:
     """Human-readable dump for --dry-run."""
     print()
@@ -247,11 +297,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             LOGGER.error("Could not write the HTML preview: %s", exc)
             return EXIT_ERROR
         print("HTML preview written to {}".format(target.resolve()))
+        report_outcome(
+            False,
+            "Ran with --dry-run, so delivery was skipped by request. "
+            "Remove the flag (or untick 'dry run' in Run workflow) to send.",
+            digest,
+        )
         return EXIT_OK
 
     # ---- send ------------------------------------------------------------
     if digest.is_empty and not settings.send_when_empty:
         LOGGER.warning("No articles found; skipping delivery (set SEND_WHEN_EMPTY=true to override)")
+        report_outcome(
+            False,
+            "No articles were found in the last {}h, so there was nothing to send. "
+            "Set SEND_WHEN_EMPTY=true to receive an empty digest anyway.".format(
+                args.hours if args.hours is not None else settings.lookback_hours
+            ),
+            digest,
+        )
         return EXIT_OK
 
     try:
@@ -266,10 +330,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except OSError as exc:
         LOGGER.warning("Digest sent, but the local copy could not be written: %s", exc)
 
-    print(
-        "Digest sent — {} article(s) to {} recipient(s).".format(
-            len(digest.items), len(settings.receiver_emails)
-        )
+    report_outcome(
+        True,
+        "Delivered {} article(s) to {}.".format(
+            len(digest.items), ", ".join(settings.receiver_emails)
+        ),
+        digest,
     )
     return EXIT_OK
 
