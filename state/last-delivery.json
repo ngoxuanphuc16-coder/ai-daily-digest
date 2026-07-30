@@ -1,6 +1,7 @@
 {
-  "articles": 0,
-  "last_sent_at": "",
-  "last_sent_date": "",
-  "run_id": ""
+  "articles": 9,
+  "last_alert_date": "",
+  "last_sent_at": "2026-07-30T12:27:16+07:00",
+  "last_sent_date": "2026-07-30",
+  "run_id": "30516566129"
 }
