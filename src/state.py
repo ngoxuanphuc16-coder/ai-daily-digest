@@ -27,6 +27,11 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_STATE_PATH = PROJECT_ROOT / "state" / "last-delivery.json"
 
 
+#: A digest is expected daily, so a gap beyond this means something is wrong
+#: rather than merely late. 26h gives the four morning slots room to retry.
+STALE_AFTER_HOURS = 26.0
+
+
 @dataclass
 class DeliveryState:
     #: ICT calendar date of the last successful send, "YYYY-MM-DD".
@@ -35,10 +40,35 @@ class DeliveryState:
     articles: int = 0
     #: GitHub run id, so a state commit can be traced back to its run.
     run_id: str = ""
+    #: ICT date of the last "I could not deliver" alert, to cap it at one/day.
+    last_alert_date: str = ""
 
     @property
     def recorded(self) -> bool:
         return bool(self.last_sent_date)
+
+    def hours_since_delivery(self, now: Optional[datetime] = None) -> Optional[float]:
+        """Hours since the last successful send, or None if never/unparseable."""
+        if not self.last_sent_at:
+            return None
+        try:
+            sent = datetime.fromisoformat(self.last_sent_at)
+        except ValueError:
+            return None
+        if sent.tzinfo is None:
+            sent = sent.replace(tzinfo=ICT)
+        moment = (now or datetime.now(ICT)).astimezone(ICT)
+        return (moment - sent).total_seconds() / 3600.0
+
+    def is_stale(self, now: Optional[datetime] = None) -> bool:
+        """True when a digest is overdue — including 'never delivered'."""
+        elapsed = self.hours_since_delivery(now)
+        if elapsed is None:
+            return self.recorded is False
+        return elapsed >= STALE_AFTER_HOURS
+
+    def alerted_today(self, now: Optional[datetime] = None) -> bool:
+        return self.last_alert_date == ict_date(now)
 
 
 def ict_date(now: Optional[datetime] = None) -> str:
@@ -76,6 +106,7 @@ def load_state(path: Optional[Path] = None) -> DeliveryState:
         last_sent_at=str(payload.get("last_sent_at") or ""),
         articles=int(payload.get("articles") or 0),
         run_id=str(payload.get("run_id") or ""),
+        last_alert_date=str(payload.get("last_alert_date") or ""),
     )
 
 
@@ -110,11 +141,25 @@ def record_delivery(
     now: Optional[datetime] = None,
 ) -> DeliveryState:
     moment = (now or datetime.now(ICT)).astimezone(ICT)
+    previous = load_state(path)
     state = DeliveryState(
         last_sent_date=ict_date(moment),
         last_sent_at=moment.isoformat(timespec="seconds"),
         articles=articles,
         run_id=run_id,
+        # Preserved so a delivery does not re-arm today's alert.
+        last_alert_date=previous.last_alert_date,
     )
+    save_state(state, path)
+    return state
+
+
+def record_alert(
+    path: Optional[Path] = None,
+    now: Optional[datetime] = None,
+) -> DeliveryState:
+    """Mark that a failure alert went out, capping it at one per ICT day."""
+    state = load_state(path)
+    state.last_alert_date = ict_date(now)
     save_state(state, path)
     return state

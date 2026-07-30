@@ -15,7 +15,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence  # noqa: F401 - Sequence used in signatures
 
 from src.config import ICT, ConfigError, OUTPUT_DIR, Settings, load_sources
 from src.emailer import (
@@ -24,12 +24,13 @@ from src.emailer import (
     build_digest,
     render_html,
     render_text,
+    send_alert,
     send_digest,
     send_test_email,
     write_html,
 )
-from src.fetcher import collect
-from src.state import ict_date, load_state, record_delivery
+from src.fetcher import FetchResult, collect
+from src.state import ict_date, load_state, record_alert, record_delivery
 from src.summarizer import summarize_articles
 
 LOGGER = logging.getLogger("ai_daily_digest")
@@ -239,6 +240,70 @@ def print_digest(digest: Digest) -> None:
     print()
 
 
+def maybe_alert(
+    args: argparse.Namespace,
+    settings: Settings,
+    reason: str,
+    fetch_results: Sequence[FetchResult],
+) -> None:
+    """Email a failure notice when the digest is overdue, not merely late.
+
+    The four morning slots make a lost day unlikely, not impossible. Without
+    this, "all four failed" and "everything is fine" look identical from the
+    inbox — which is the silence this whole design exists to prevent.
+
+    Rate-limited to one alert per ICT day, and skipped while the digest is only
+    hours late, so an ordinary quiet morning does not page anyone.
+    """
+    if args.dry_run or not args.once_per_day:
+        return
+    if settings.missing_smtp_vars():
+        return
+
+    state = load_state(args.state)
+    if not state.is_stale():
+        LOGGER.info("Digest not delivered this run, but not yet overdue — no alert.")
+        return
+    if state.alerted_today():
+        LOGGER.info("Alert already sent today; not repeating.")
+        return
+
+    elapsed = state.hours_since_delivery()
+    lines = [
+        "Bản tin AI hằng ngày chưa gửi được.",
+        "",
+        "Lý do: {}".format(reason),
+        (
+            "Lần gửi thành công gần nhất: {} ({:.0f} giờ trước).".format(
+                state.last_sent_at, elapsed
+            )
+            if elapsed is not None
+            else "Chưa từng gửi thành công lần nào."
+        ),
+        "",
+    ]
+    if fetch_results:
+        lines.append("Trạng thái từng nguồn:")
+        for result in fetch_results:
+            lines.append(
+                "  - {:<28} {:<6} {} bài  {}".format(
+                    result.source_name, result.status, result.count, result.detail or ""
+                )
+            )
+        lines.append("")
+    lines += [
+        "Hệ thống sẽ tự thử lại ở các mốc còn lại trong sáng nay, và sáng mai.",
+        "Email này chỉ gửi một lần mỗi ngày.",
+    ]
+
+    try:
+        send_alert(settings, "⚠️ AI Daily Digest — chưa gửi được bản tin", lines)
+        record_alert(args.state)
+    except (ConfigError, EmailError) as exc:
+        # If SMTP is what is broken, nothing in this process can reach the user.
+        LOGGER.error("Could not send the alert email either: %s", exc)
+
+
 def run_pipeline(args: argparse.Namespace, settings: Settings) -> Digest:
     sources_config = load_sources(args.sources or settings.sources_path)
     enabled = sources_config.enabled_sources
@@ -322,6 +387,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return EXIT_CONFIG
     except Exception as exc:  # noqa: BLE001 - top-level guard for a scheduled job
         LOGGER.exception("Pipeline failed: %s", exc)
+        maybe_alert(
+            args,
+            settings,
+            "Không dựng được bản tin: {}: {}".format(type(exc).__name__, exc),
+            [],
+        )
         return EXIT_ERROR
 
     # ---- --dry-run -------------------------------------------------------
@@ -344,6 +415,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # ---- send ------------------------------------------------------------
     if digest.is_empty and not settings.send_when_empty:
+        maybe_alert(
+            args,
+            settings,
+            "Không thu được bài viết nào trong {}h qua.".format(
+                args.hours if args.hours is not None else settings.lookback_hours
+            ),
+            digest.fetch_results,
+        )
         LOGGER.warning("No articles found; skipping delivery (set SEND_WHEN_EMPTY=true to override)")
         report_outcome(
             False,
@@ -359,6 +438,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         html = send_digest(digest, settings, settings.template_dir)
     except (ConfigError, EmailError) as exc:
         LOGGER.error("%s", exc)
+        # No alert here on purpose: delivery itself just failed, so an alert
+        # over the same channel would fail too. GitHub's own workflow-failure
+        # notification is the escalation path for this case.
+        report_outcome(False, "Delivery failed: {}".format(exc), digest)
         return EXIT_CONFIG if isinstance(exc, ConfigError) else EXIT_ERROR
 
     # Record only after a confirmed send, so a failed attempt leaves the day

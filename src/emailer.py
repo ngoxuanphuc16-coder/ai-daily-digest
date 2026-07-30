@@ -409,6 +409,32 @@ def send_test_email(settings: Settings) -> None:
     LOGGER.info("Test email sent to %s", ", ".join(settings.receiver_emails))
 
 
+def send_alert(settings: Settings, subject: str, body_lines: Sequence[str]) -> None:
+    """Send a plain-text "I could not deliver the digest" notice.
+
+    Deliberately depends on nothing but SMTP — no Jinja template, no Gemini, no
+    feeds — so it still works when those are exactly what broke. If SMTP itself
+    is down this cannot help, and nothing inside the job could.
+    """
+    settings.require_smtp()
+
+    text = "\n".join(body_lines)
+    html = (
+        '<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;'
+        'max-width:560px;margin:0 auto;padding:24px;line-height:1.6">'
+        '<h2 style="margin:0 0 12px">⚠️ AI Daily Digest</h2><pre style="white-space:pre-wrap;'
+        'font-family:inherit;margin:0">{}</pre></div>'
+    ).format(
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+
+    message = _build_message(subject, html, text, settings)
+    with _smtp_connection(settings) as server:
+        server.sendmail(settings.sender_email, settings.receiver_emails, message.as_string())
+
+    LOGGER.info("Alert email sent to %s", ", ".join(settings.receiver_emails))
+
+
 def write_html(html: str, path: Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

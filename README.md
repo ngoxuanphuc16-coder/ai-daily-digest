@@ -244,6 +244,34 @@ annoyance; silence is the failure that actually matters.
 
 To bypass the guard: `--force` locally, or tick *force* in Run workflow.
 
+#### What if all four slots fail?
+
+Four slots make a lost day unlikely, not impossible — so the remaining job is
+to make sure a lost day is never *silent*. Which channel warns you depends on
+what broke, and the distinction matters:
+
+| What broke | How you find out |
+|---|---|
+| Feeds fetched nothing, or the pipeline crashed | **Alert email** — plain text, no Gemini or Jinja involved, listing every source's status |
+| SMTP itself is down or the password is wrong | **GitHub workflow-failure email** — the job exits non-zero. An alert email cannot help here, since email is the broken part |
+| GitHub dropped all four cron firings | Nothing ran, so nothing can report it. See below |
+
+The alert is deliberately **not** sent the moment a digest is late. It waits
+until delivery is *overdue* — no successful send for 26 hours (`STALE_AFTER_HOURS`),
+which leaves all four slots room to retry — and it is capped at **one per day**,
+so a bad morning produces one email, not four. A failure to deliver never
+records the date, so the day stays open for the next slot and for tomorrow.
+
+The third row is the honest limit: **a process cannot report its own
+non-execution.** Nothing inside this repo can detect that GitHub never started
+it. What the design does instead is make the gap self-announcing — the next run
+that does fire sees a 26h+ gap and emails you about it. So a fully lost day
+turns into a late alert, not permanent silence.
+
+If you need a harder guarantee than that, GitHub Actions is the wrong
+foundation and you want a host that is always on (a small VPS with cron, or
+Windows Task Scheduler on a machine that never sleeps).
+
 ### Local cron
 
 ```bash
