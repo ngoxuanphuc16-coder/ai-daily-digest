@@ -92,8 +92,11 @@ Practical consequences:
 
 - Test with `--no-llm` or `--limit 2`. A full `--dry-run` costs 18 of your 20.
 - Exceed the daily cap and the digest still arrives, just mostly extractive.
-- The quota resets on Google's schedule (midnight US Pacific), not at local
-  midnight — so a morning ICT run sits mid-cycle.
+- The quota resets at **midnight UTC** — 07:00 ICT. Measured: exhausted at
+  03:50 UTC, full again by 01:57 UTC the next day, i.e. before Pacific
+  midnight. The scheduled slots sit just after 00:00 UTC to get a fresh
+  allowance; a test run during the Vietnamese afternoon spends from the *same*
+  UTC day as the next morning's digest.
 - On a paid tier, raise `GEMINI_RPM` and `MAX_ARTICLES` together.
 
 Within a run, requests are spaced evenly to respect `GEMINI_RPM` rather than
@@ -140,6 +143,9 @@ python main.py --dry-run --verbose  # debug logging
 | `--no-llm` | Bypass Gemini entirely |
 | `--limit N` | Max articles to summarize |
 | `--hours H` | Lookback window |
+| `--once-per-day` | Skip sending if today's digest already went out |
+| `--force` | Send anyway, overriding `--once-per-day` |
+| `--state PATH` | Alternate delivery-state file |
 | `--sources PATH` | Alternate `sources.yaml` |
 | `--env PATH` | Alternate `.env` |
 | `--output PATH` | Where to write the HTML |
@@ -205,11 +211,38 @@ Optionally add non-secret **Variables** to override defaults: `GEMINI_MODEL`,
 `SMTP_SERVER`, `SMTP_PORT`, `SENDER_NAME`, `MAX_ARTICLES`, `SUMMARY_WORKERS`.
 
 Trigger a manual run from the **Actions** tab — the `workflow_dispatch` inputs
-let you tick *dry run* or *no LLM* to test without emailing anyone. Every run
-uploads the rendered HTML as a downloadable artifact.
+let you tick *dry run*, *no LLM*, or *force* to test without emailing anyone.
+Every run uploads the rendered HTML as a downloadable artifact.
 
-> GitHub's cron is best-effort and can lag by several minutes under load. If
-> you need the mail to land at exactly 07:00, schedule it a little earlier.
+#### Surviving GitHub's unreliable scheduler
+
+GitHub's `schedule` event is **best-effort, not a guarantee**. It routinely
+drops the first firing of a newly created cron, and sheds load at contended
+slots — `0 0 * * *`, midnight UTC on the hour, is the worst possible choice.
+A single daily trigger silently loses days.
+
+So the workflow fires **four times** each Vietnamese morning (07:07, 07:29,
+08:13, 09:41 ICT) and `main.py` runs with `--once-per-day`:
+
+1. Before fetching anything, it reads `state/last-delivery.json`.
+2. If the ICT date there matches today, it exits immediately — no publisher
+   requests, no Gemini calls, a few seconds of runtime.
+3. Otherwise it builds and sends the digest, then records the date.
+4. The workflow commits that marker back to the repo.
+
+Whichever slot lands first delivers; the rest are no-ops. A **failed** send
+leaves the day unmarked, so the next slot retries it. You get one email per
+day even though four triggers fire.
+
+The daily state commit has a useful side effect: it counts as repository
+activity, which is what prevents GitHub from auto-disabling scheduled
+workflows on a public repo after 60 days of inactivity.
+
+The guard deliberately **fails open** — a missing, corrupt, or BOM-prefixed
+state file is treated as "not yet sent". A duplicate email is a mild
+annoyance; silence is the failure that actually matters.
+
+To bypass the guard: `--force` locally, or tick *force* in Run workflow.
 
 ### Local cron
 

@@ -29,6 +29,7 @@ from src.emailer import (
     write_html,
 )
 from src.fetcher import collect
+from src.state import ict_date, load_state, record_delivery
 from src.summarizer import summarize_articles
 
 LOGGER = logging.getLogger("ai_daily_digest")
@@ -126,6 +127,27 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="PATH",
         help="where to write the rendered HTML (default: output/digest-YYYY-MM-DD.html)",
+    )
+    parser.add_argument(
+        "--once-per-day",
+        action="store_true",
+        help=(
+            "skip sending if a digest was already delivered for today's ICT date. "
+            "Lets the workflow fire several morning slots to survive a dropped "
+            "cron without ever sending twice"
+        ),
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="send even if today's digest was already delivered (overrides --once-per-day)",
+    )
+    parser.add_argument(
+        "--state",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="alternate delivery-state file (default: state/last-delivery.json)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     parser.add_argument("-q", "--quiet", action="store_true", help="warnings and errors only")
@@ -277,6 +299,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             LOGGER.error("Tip: run with --dry-run to preview the digest without sending it.")
             return EXIT_CONFIG
 
+    # ---- already delivered today? ----------------------------------------
+    # Checked BEFORE fetching or summarizing: the redundant morning slots that
+    # exist to survive a dropped cron must cost nothing — no Gemini quota, no
+    # requests to publishers. A no-op run finishes in seconds.
+    if args.once_per_day and not args.dry_run and not args.force:
+        state = load_state(args.state)
+        if state.last_sent_date == ict_date():
+            report_outcome(
+                False,
+                "Today's digest was already delivered at {} ({} article(s)), so this "
+                "run is a no-op. Extra morning slots exist to cover a dropped cron; "
+                "use --force to send anyway.".format(state.last_sent_at, state.articles),
+            )
+            return EXIT_OK
+
     # ---- pipeline --------------------------------------------------------
     try:
         digest = run_pipeline(args, settings)
@@ -323,6 +360,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except (ConfigError, EmailError) as exc:
         LOGGER.error("%s", exc)
         return EXIT_CONFIG if isinstance(exc, ConfigError) else EXIT_ERROR
+
+    # Record only after a confirmed send, so a failed attempt leaves the day
+    # unmarked and the next scheduled slot retries it.
+    if args.once_per_day:
+        record_delivery(
+            articles=len(digest.items),
+            run_id=os.environ.get("GITHUB_RUN_ID", ""),
+            path=args.state,
+        )
 
     # Keep a copy so the GitHub Actions run can upload it as an artifact.
     try:

@@ -1,20 +1,34 @@
 name: Daily AI Digest
 
+# GitHub's `schedule` event is best-effort, not a guarantee: it drops the first
+# firing of a newly created cron and sheds load at contended slots. A single
+# daily trigger therefore loses days at random.
+#
+# So this fires four times each Vietnamese morning instead. `--once-per-day`
+# makes every slot after a successful send a no-op — the guard is checked
+# before any fetching or summarizing, so a redundant run costs no Gemini quota
+# and finishes in seconds. Whichever slot lands first delivers; the rest do
+# nothing. If a send fails, the day stays unmarked and the next slot retries.
 on:
   schedule:
-    # 23:47 UTC == 06:47 ICT (UTC+7), aimed so that normal scheduler lag lands
-    # the mail around 07:00 local.
+    # Odd minutes, off the top of the hour, which is the most contended slot.
     #
-    # Deliberately NOT "0 0 * * *". GitHub's schedule event is best-effort:
-    # top-of-the-hour slots — midnight UTC worst of all — are the most
-    # contended, and runs there get delayed by tens of minutes or dropped
-    # outright. An odd minute off the hour is materially more reliable.
-    #
-    # Note also that GitHub commonly skips the very first firing of a newly
-    # created cron, so do not read one missing run as a broken schedule.
-    - cron: "47 23 * * *"
+    # All four sit just AFTER 00:00 UTC on purpose. Gemini's free daily quota
+    # resets at midnight UTC (measured: exhausted 03:50 UTC, full again by
+    # 01:57 UTC the next day, before Pacific midnight), so a slot at 23:4x
+    # would spend the previous day's allowance — the one a daytime test run is
+    # most likely to have drained. Staying inside one UTC day also keeps all
+    # four slots on a single quota day.
+    - cron: "7 0 * * *"     # 07:07 ICT — intended delivery, fresh quota
+    - cron: "29 0 * * *"    # 07:29 ICT — catches a dropped 07:07
+    - cron: "13 1 * * *"    # 08:13 ICT
+    - cron: "41 2 * * *"    # 09:41 ICT — last resort for a bad morning
   workflow_dispatch:
     inputs:
+      force:
+        description: "Send even if today's digest already went out"
+        type: boolean
+        default: false
       dry_run:
         description: "Preview only — do not send the email"
         type: boolean
@@ -29,9 +43,13 @@ on:
         default: "24"
 
 permissions:
-  contents: read
+  # Needed to commit the delivery marker back to the repo.
+  contents: write
 
 concurrency:
+  # Never let two slots race. `cancel-in-progress: false` matters: cancelling a
+  # run that has already sent the mail would lose the marker and cause a
+  # duplicate from the next slot.
   group: daily-digest
   cancel-in-progress: false
 
@@ -39,7 +57,7 @@ jobs:
   digest:
     name: Build and send digest
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -73,9 +91,36 @@ jobs:
           # Gemini free tier = 5 requests/minute. Raise it if you have paid quota.
           GEMINI_RPM: ${{ vars.GEMINI_RPM || '5' }}
         run: |
-          python main.py \
+          python main.py --once-per-day \
+            ${{ inputs.force && '--force' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
             ${{ inputs.no_llm && '--no-llm' || '' }}
+
+      - name: Record delivery
+        # Runs even on failure so a partial success still records; the file only
+        # changes when main.py actually sent something.
+        if: always()
+        run: |
+          if [ -z "$(git status --porcelain state/)" ]; then
+            echo "No delivery recorded this run — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/
+          git commit -m "chore(state): digest delivered $(date -u +%Y-%m-%dT%H:%M:%SZ) [skip ci]"
+          # Another slot may have pushed while we were summarizing.
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin main && git push origin HEAD:main; then
+              echo "Delivery marker pushed."
+              exit 0
+            fi
+            echo "Push attempt $attempt failed; retrying."
+            sleep 5
+          done
+          # A lost marker only risks one duplicate email tomorrow, so this must
+          # not fail the job after the digest has already been delivered.
+          echo "::warning::Could not push the delivery marker."
 
       - name: Upload rendered digest
         if: always()

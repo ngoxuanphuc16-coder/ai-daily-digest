@@ -6,6 +6,10 @@
 # Generated digests (the Jinja template itself lives in templates/ and IS tracked)
 output/
 
+# NOTE: state/ is deliberately NOT ignored. state/last-delivery.json is the
+# marker that stops the redundant morning cron slots from sending duplicate
+# emails, and it only works if it round-trips through the repo.
+
 # Python
 __pycache__/
 *.py[cod]
