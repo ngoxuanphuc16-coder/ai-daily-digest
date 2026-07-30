@@ -2,9 +2,17 @@ name: Daily AI Digest
 
 on:
   schedule:
-    # 00:00 UTC == 07:00 ICT (UTC+7). GitHub's scheduler is best-effort and can
-    # lag by several minutes during peak load — that is expected, not a bug.
-    - cron: "0 0 * * *"
+    # 23:47 UTC == 06:47 ICT (UTC+7), aimed so that normal scheduler lag lands
+    # the mail around 07:00 local.
+    #
+    # Deliberately NOT "0 0 * * *". GitHub's schedule event is best-effort:
+    # top-of-the-hour slots — midnight UTC worst of all — are the most
+    # contended, and runs there get delayed by tens of minutes or dropped
+    # outright. An odd minute off the hour is materially more reliable.
+    #
+    # Note also that GitHub commonly skips the very first firing of a newly
+    # created cron, so do not read one missing run as a broken schedule.
+    - cron: "47 23 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
