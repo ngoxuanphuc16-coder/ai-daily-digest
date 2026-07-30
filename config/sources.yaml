@@ -76,6 +76,16 @@ sources:
       type: rss
       url: https://engineering.fb.com/category/ml-applications/feed/
 
+  # Google's official AI blog — broader than DeepMind, catches Gemini model
+  # launches and Google-wide AI announcements that the DeepMind feed misses.
+  - id: google-ai-blog
+    name: Google AI Blog
+    category: Frontier Labs
+    type: rss
+    url: https://blog.google/technology/ai/rss/
+    homepage: https://blog.google/technology/ai/
+    enabled: true
+
   - id: huggingface
     name: Hugging Face
     category: Open Source & Community
@@ -96,6 +106,29 @@ sources:
     fallback:
       type: rss
       url: https://blogs.microsoft.com/feed/
+
+  # The Verge covers model releases from all major labs — often the first to
+  # report with analysis. High editorial quality, catches announcements that
+  # might only appear on X/Twitter otherwise.
+  - id: the-verge-ai
+    name: The Verge — AI
+    category: Media & Analysis
+    type: rss
+    url: https://www.theverge.com/rss/ai-artificial-intelligence/index.xml
+    homepage: https://www.theverge.com/ai-artificial-intelligence
+    enabled: true
+    max_articles_per_source: 6
+
+  # TechCrunch's AI section covers funding, launches, and new model releases
+  # across the industry with business-oriented analysis.
+  - id: techcrunch-ai
+    name: TechCrunch — AI
+    category: Media & Analysis
+    type: rss
+    url: https://techcrunch.com/category/artificial-intelligence/feed/
+    homepage: https://techcrunch.com/category/artificial-intelligence/
+    enabled: true
+    max_articles_per_source: 6
 
   - id: mit-tech-review
     name: MIT Technology Review — AI

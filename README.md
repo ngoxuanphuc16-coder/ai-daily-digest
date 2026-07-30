@@ -1,10 +1,12 @@
 # AI Daily Digest
 
-Collects the day's AI/tech news from eight leading sources, summarizes each
-article with **Google Gemini** (in Vietnamese), and emails a responsive HTML
-digest every morning at **07:00 ICT (UTC+7)**.
+Collects the day's AI/tech news from eleven sources, **ranks by relevance
+using a hybrid retrieval model**, summarizes each article with **Google Gemini**
+(in Vietnamese), and emails a responsive HTML digest every morning at
+**07:00 ICT (UTC+7)**.
 
 - **Fetch** — RSS + BeautifulSoup scraping, 24-hour window, URL and fuzzy-title dedup
+- **Rank** — Hybrid BM25-keyword + structural-authority ranker prioritizes model-release articles from OpenAI, Google, Anthropic before the Gemini quota is spent
 - **Summarize** — `gemini-2.5-flash` returns structured JSON: TL;DR, 3 takeaways, a 1–5 importance score, and tags
 - **Deliver** — Jinja2 HTML email with light/dark support, a Top-3 "must-read" block, and per-publisher sections
 - **Automate** — GitHub Actions cron, or run it locally
@@ -167,8 +169,11 @@ a `fallback:` block used only when the primary comes up empty.
 | Anthropic | **HTML scrape** | No RSS exists — every feed URL 404s |
 | Google DeepMind | RSS | Posts in bursts, not daily |
 | Meta AI & Engineering | RSS | `engineering.fb.com` — see below |
+| Google AI Blog | RSS | Broader than DeepMind — catches Gemini launches |
 | Hugging Face | RSS | Community blog, high volume |
 | Microsoft AI | RSS | `news.microsoft.com` AI topic feed |
+| The Verge — AI | RSS | Model releases across all labs, editorial analysis |
+| TechCrunch — AI | RSS | Launches, funding, business-oriented AI coverage |
 | MIT Technology Review | RSS | AI section |
 | arXiv cs.AI | RSS | Capped at 5/day to avoid flooding |
 
@@ -180,6 +185,24 @@ with verified-live endpoints:
 | `anthropic.com/rss.xml` | 404 | HTML scrape of `/news` |
 | `ai.meta.com/blog/rss/` | 404 | `engineering.fb.com/feed/` |
 | `blogs.microsoft.com/ai/feed/` | 410 Gone | `news.microsoft.com/source/topics/ai/feed/` |
+
+### Hybrid relevance ranking
+
+With 11 sources producing more articles than the daily Gemini quota can
+summarize, the pipeline needs to spend those 18 slots on the articles that
+matter most. A hybrid ranker (`src/ranker.py`) scores every article before the
+global cap is applied, combining four signals:
+
+| Signal | Weight | What it measures |
+|---|---|---|
+| **BM25 keywords** | 40% | Term frequency against a curated model-release vocabulary (model names, launch verbs, capability terms) with TF saturation |
+| **Title patterns** | 25% | Regex detection of announcement headlines ("introduces X", "launches Y model") and target-company mentions |
+| **Source authority** | 20% | First-party labs (OpenAI, Anthropic, DeepMind) score highest; journalism sources score moderately; arXiv lowest for release news |
+| **Recency** | 15% | Linear scale — newest article = 1.0, oldest = 0.0 |
+
+The ranker runs entirely on CPU with zero API calls, so it never competes with
+the Gemini quota. Articles are sorted by combined relevance score; the global
+`MAX_ARTICLES` cap then keeps only the top N for summarization.
 
 **Anthropic** is scraped because no feed exists. Its cards carry a date, but
 only to day precision, so a post from yesterday afternoon can fall outside a
@@ -297,6 +320,7 @@ ai-daily-digest/
 ├── src/
 │   ├── config.py                  # .env + sources.yaml loading
 │   ├── fetcher.py                 # RSS/HTML collection, 24h window, dedup
+│   ├── ranker.py                  # hybrid BM25 + authority relevance ranker
 │   ├── summarizer.py              # Gemini client + extractive fallback
 │   └── emailer.py                 # digest assembly, rendering, SMTP
 ├── templates/email_template.html  # Jinja2 email
@@ -306,10 +330,12 @@ ai-daily-digest/
 ```
 
 **Pipeline:** `collect()` fetches every enabled source (isolating failures),
-filters to the window, and dedups by canonical URL then fuzzy title →
-`summarize_articles()` runs Gemini in a small thread pool, degrading per
-article → `build_digest()` ranks by importance, picks the top 3, groups the
-rest by publisher → `send_digest()` renders and sends `multipart/alternative`.
+filters to the window, dedups by canonical URL then fuzzy title, and **ranks by
+hybrid relevance** (BM25 keywords + source authority + title patterns +
+recency) → the global cap keeps the top N → `summarize_articles()` runs Gemini
+in a small thread pool, degrading per article → `build_digest()` ranks by
+importance, picks the top 3, groups the rest by publisher → `send_digest()`
+renders and sends `multipart/alternative`.
 
 ---
 

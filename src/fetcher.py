@@ -532,9 +532,29 @@ def collect(
     lookback_hours: Optional[int] = None,
     limit: Optional[int] = None,
 ) -> FetchReport:
-    """fetch_all + deduplicate + optional global cap. The entry point main uses."""
+    """fetch_all + deduplicate + relevance rank + optional global cap.
+
+    The hybrid ranker runs after dedup but before the cap, so the Gemini
+    quota is spent on the most relevant articles — model releases from
+    OpenAI, Google, Anthropic, and similar announcements float to the top.
+    """
     report = fetch_all(sources, defaults, lookback_hours)
     report.articles = deduplicate(report.articles)
+
+    if len(report.articles) > 1:
+        from .ranker import rank_articles
+
+        scored = rank_articles(report.articles)
+        report.articles = [s.article for s in scored]
+        top = scored[0]
+        LOGGER.info(
+            "Ranked %d article(s) — top: %r (relevance=%.2f, bm25=%.2f, authority=%.2f)",
+            len(scored),
+            top.article.title[:60],
+            top.relevance,
+            top.bm25_score,
+            top.authority_score,
+        )
 
     if limit and len(report.articles) > limit:
         LOGGER.info("Capping %d article(s) to %d", len(report.articles), limit)
